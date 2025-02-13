@@ -1,0 +1,19 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required: []
+    properties:
+      gitDefaultPath:
+        type: string
+        description: Optional default path for Git operations.
+      githubPersonalAccessToken:
+        type: string
+        description: Optional GitHub Personal Access Token for operations.
+  commandFunction:
+    # A function that produces the CLI command to start the MCP on stdio.
+    |-
+    (config) => ({ command: 'node', args: ['build/index.js'], env: { GIT_DEFAULT_PATH: config.gitDefaultPath, GITHUB_PERSONAL_ACCESS_TOKEN: config.githubPersonalAccessToken } })
