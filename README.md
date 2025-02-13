@@ -1,5 +1,7 @@
 # Git MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@Sheshiyer/git-mcp-v2)](https://smithery.ai/server/@Sheshiyer/git-mcp-v2)
+
 A Model Context Protocol (MCP) server that provides enhanced Git operations through a standardized interface. This server integrates with the MCP ecosystem to provide Git functionality to AI assistants.
 
 ## Features
@@ -18,6 +20,15 @@ A Model Context Protocol (MCP) server that provides enhanced Git operations thro
 
 ## Installation
 
+### Installing via Smithery
+
+To install Git MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Sheshiyer/git-mcp-v2):
+
+```bash
+npx -y @smithery/cli install @Sheshiyer/git-mcp-v2 --client claude
+```
+
+### Manual Installation
 1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/git-mcp-v2.git
