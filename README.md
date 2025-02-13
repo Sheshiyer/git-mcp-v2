@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server that provides enhanced Git operations through a standardized interface. This server integrates with the MCP ecosystem to provide Git functionality to AI assistants.
 
+<a href="https://glama.ai/mcp/servers/46aozzlyhx"><img width="380" height="200" src="https://glama.ai/mcp/servers/46aozzlyhx/badge" alt="Git Server MCP server" /></a>
+
 ## Features
 
 - **Core Git Operations**: init, clone, status, add, commit, push, pull
