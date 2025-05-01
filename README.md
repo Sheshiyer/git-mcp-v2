@@ -43,7 +43,13 @@ Add to your MCP settings file:
   "mcpServers": {
     "git-v2": {
       "command": "node",
-      "args": ["path/to/git-mcp-v2/build/index.js"],
+      "args": [
+        "path/to/git-mcp-v2/build/index.js", 
+        "--include-tools",
+        "status,add,commit,push,pull,branch_list,branch_create,branch_delete,checkout,remote_list,remote_add,remote_remove,stash_list,stash_save,stash_pop, bulk_action",
+        "--exclude-tools",
+        "checkout,remote_list,remote_add,remote_remove,stash_list,stash_save,stash_pop, bulk_action"
+      ],
       "env": {
         "GIT_DEFAULT_PATH": "/path/to/default/git/directory",
         "GITHUB_PERSONAL_ACCESS_TOKEN": "your-github-pat"

@@ -36,7 +36,9 @@ export interface BasePathOptions {
   /**
    * MUST be an absolute path to the repository
    * Example: /Users/username/projects/my-repo
-   * If not provided, will use GIT_DEFAULT_PATH from environment
+   * If not provided, will try the following fallbacks in order:
+   * 1. GIT_DEFAULT_PATH environment variable
+   * 2. Current working directory
    */
   path?: string;
 }
@@ -221,4 +223,43 @@ export function isBulkActionOptions(obj: any): obj is BulkActionOptions {
         return false;
     }
   });
+}
+
+export type GitToolName =
+  | 'init'
+  | 'clone'
+  | 'status'
+  | 'add'
+  | 'commit'
+  | 'push'
+  | 'pull'
+  | 'branch_list'
+  | 'branch_create'
+  | 'branch_delete'
+  | 'checkout'
+  | 'tag_list'
+  | 'tag_create'
+  | 'tag_delete'
+  | 'remote_list'
+  | 'remote_add'
+  | 'remote_remove'
+  | 'stash_list'
+  | 'stash_save'
+  | 'stash_pop'
+  | 'bulk_action';
+
+// Configuration for the Git MCP server
+export interface GitServerConfig {
+  /**
+   * List of tools to include. If not provided, all tools will be enabled by default.
+   * Specify an array of tool names to selectively enable only those tools.
+   */
+  includeTools?: GitToolName[];
+
+  /**
+   * List of tools to exclude. These tools will be disabled even if they are in the includeTools list.
+   * Specify an array of tool names to selectively disable specific tools.
+   */
+  excludeTools?: GitToolName[];
+
 }

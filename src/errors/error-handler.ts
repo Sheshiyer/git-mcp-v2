@@ -1,13 +1,13 @@
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { logger } from '../utils/logger.js';
 import {
   ErrorCategory,
-  ErrorSeverity,
   ErrorCategoryType,
+  ErrorContext,
+  ErrorSeverity,
   ErrorSeverityType,
-  GitMcpError,
-  ErrorContext
+  GitMcpError
 } from './error-types.js';
-import { logger } from '../utils/logger.js';
 
 /**
  * Maps error categories to appropriate MCP error codes
@@ -171,6 +171,13 @@ export class ErrorHandler {
    */
   static handleSecurityError(error: Error, context: Partial<ErrorContext>): GitMcpError {
     return this.handleError(error, ErrorCategory.SECURITY, ErrorSeverity.CRITICAL, context);
+  }
+
+  /**
+   * Creates and handles a file error
+   */
+  static handleFileError(error: Error, context: Partial<ErrorContext>): GitMcpError {
+    return this.handleError(error, ErrorCategory.SYSTEM, ErrorSeverity.HIGH, context);
   }
 
   /**

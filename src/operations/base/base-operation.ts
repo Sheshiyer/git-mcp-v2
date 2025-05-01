@@ -1,13 +1,12 @@
-import { CommandExecutor } from '../../utils/command.js';
-import { PathValidator } from '../../utils/path.js';
-import { logger } from '../../utils/logger.js';
-import { repositoryCache } from '../../caching/repository-cache.js';
-import { RepoStateType } from '../../caching/repository-cache.js';
-import { GitToolContext, GitToolResult } from '../../types.js';
+import { repositoryCache, RepoStateType } from '../../caching/repository-cache.js';
 import { GitCommandBuilder } from '../../common/command-builder.js';
-import { GitOperationOptions, GitOperationResult, CommandResult } from './operation-result.js';
 import { ErrorHandler } from '../../errors/error-handler.js';
 import { GitMcpError } from '../../errors/error-types.js';
+import { GitToolContext } from '../../types.js';
+import { CommandExecutor } from '../../utils/command.js';
+import { logger } from '../../utils/logger.js';
+import { PathValidator } from '../../utils/path.js';
+import { CommandResult, GitOperationOptions, GitOperationResult } from './operation-result.js';
 
 /**
  * Base class for all Git operations providing common functionality
@@ -157,12 +156,19 @@ export abstract class BaseGitOperation<TOptions extends GitOperationOptions, TRe
    * Get resolved path with proper validation
    */
   protected getResolvedPath(): string {
-    const path = this.options.path || process.env.GIT_DEFAULT_PATH;
+    // Use path from options if provided
+    let path = this.options.path;
+    
+    // Otherwise, check for GIT_DEFAULT_PATH
+    if (!path && process.env.GIT_DEFAULT_PATH) {
+      path = process.env.GIT_DEFAULT_PATH;
+    }
+    
+    // If neither is available, use the current working directory
     if (!path) {
-      throw ErrorHandler.handleValidationError(
-        new Error('Path must be provided when GIT_DEFAULT_PATH is not set'),
-        { operation: this.context.operation }
-      );
+      path = process.cwd();
+      // Log that we're using current working directory
+      logger.info(this.context.operation, `No path provided, using current working directory: ${path}`);
     }
 
     const { path: repoPath } = PathValidator.validateGitRepo(path);
