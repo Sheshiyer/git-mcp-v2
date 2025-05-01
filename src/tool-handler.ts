@@ -1,41 +1,112 @@
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
-  ErrorCode,
   ListToolsRequestSchema,
-  McpError,
+  McpError
 } from '@modelcontextprotocol/sdk/types.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { GitOperations } from './git-operations.js';
-import { logger } from './utils/logger.js';
 import { ErrorHandler } from './errors/error-handler.js';
 import { GitMcpError } from './errors/error-types.js';
+import { GitOperations } from './git-operations.js';
 import {
-  isInitOptions,
-  isCloneOptions,
+  BasePathOptions,
+  GitServerConfig,
+  GitToolName,
   isAddOptions,
-  isCommitOptions,
-  isPushPullOptions,
   isBranchOptions,
+  isBulkActionOptions,
   isCheckoutOptions,
-  isTagOptions,
+  isCloneOptions,
+  isCommitOptions,
+  isInitOptions,
+  isPathOnly,
+  isPushPullOptions,
   isRemoteOptions,
   isStashOptions,
-  isPathOnly,
-  isBulkActionOptions,
-  BasePathOptions,
+  isTagOptions
 } from './types.js';
+import { logger } from './utils/logger.js';
 
-const PATH_DESCRIPTION = `MUST be an absolute path (e.g., /Users/username/projects/my-repo)`;
+const PATH_DESCRIPTION = `MUST be an absolute path (e.g., /Users/username/projects/my-repo) if provided, otherwise the current working directory will be used`;
 const FILE_PATH_DESCRIPTION = `MUST be an absolute path (e.g., /Users/username/projects/my-repo/src/file.js)`;
 
 export class ToolHandler {
   private static readonly TOOL_PREFIX = 'git_mcp_server';
+  private enabledTools: Set<string> | null = null;
+  private includedTools: Set<string> | null = null;
+  private excludedTools: Set<string> = new Set();
 
   constructor(private server: Server) {
     this.setupHandlers();
   }
 
-  private getOperationName(toolName: string): string {
+  /**
+   * Configure the tool handler
+   * @param config Server configuration
+   */
+  public configure(config: GitServerConfig): void {
+    // First check for include/exclude style configuration
+    if (config.includeTools || config.excludeTools) {
+      // Set up included tools if specified
+      if (config.includeTools && config.includeTools.length > 0) {
+        this.includedTools = new Set(config.includeTools.map(tool => tool));
+        logger.info('ToolHandler', 'Configured with specific included tools', JSON.stringify([...this.includedTools]));
+      } else {
+        // If not specified, enable all tools by default
+        this.includedTools = null;
+        logger.info('ToolHandler', 'Configured with all tools included by default');
+      }
+      
+      // Set up excluded tools if specified
+      if (config.excludeTools && config.excludeTools.length > 0) {
+        this.excludedTools = new Set(config.excludeTools.map(tool => tool));
+        logger.info('ToolHandler', 'Configured with specific excluded tools', JSON.stringify([...this.excludedTools]));
+      } else {
+        // If not specified, no tools are excluded by default
+        this.excludedTools = new Set();
+      }
+      
+      // For backward compatibility, keep this null since we're using the new approach
+      this.enabledTools = null;
+    } 
+    
+    // Re-setup tool definitions to apply configuration
+    this.setupToolDefinitions();
+  }
+
+  /**
+   * Check if a tool is enabled
+   * @param toolName Name of the tool to check
+   * @returns True if the tool is enabled, false otherwise
+   */
+  private isToolEnabled(toolName: GitToolName): boolean {
+    // First check if using new include/exclude configuration
+    if (this.includedTools !== null || this.excludedTools.size > 0) {
+      // If tool is in excluded list, it's disabled regardless of include settings
+      if (this.excludedTools.has(toolName)) {
+        return false;
+      }
+      
+      // If no specific included tools are configured, all non-excluded tools are enabled
+      if (this.includedTools === null) {
+        return true;
+      }
+      
+      // Otherwise, check if the tool is in the included tools set
+      return this.includedTools.has(toolName);
+    }
+    // Legacy mode
+    else {
+      // If no specific enabled tools are configured, all tools are enabled
+      if (this.enabledTools === null) {
+        return true;
+      }
+      
+      // Otherwise, check if the tool is in the enabled tools set
+      return this.enabledTools.has(toolName);
+    }
+  }
+
+  private getOperationName(toolName: GitToolName): string {
     return `${ToolHandler.TOOL_PREFIX}.${toolName}`;
   }
 
@@ -65,506 +136,601 @@ export class ToolHandler {
   }
 
   private setupToolDefinitions(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'init',
-          description: 'Initialize a new Git repository',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to initialize the repository in. ${PATH_DESCRIPTION}`,
-              },
+    // Define all available tools with their configurations
+    const allTools = [
+      // Only include if the tool is enabled
+      this.isToolEnabled('init') ? {
+        name: 'init',
+        description: 'Initialize a new Git repository',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to initialize the repository in. ${PATH_DESCRIPTION}`,
             },
-            required: [],
           },
+          required: [],
         },
-        {
-          name: 'clone',
-          description: 'Clone a repository',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              url: {
-                type: 'string',
-                description: 'URL of the repository to clone',
-              },
-              path: {
-                type: 'string',
-                description: `Path to clone into. ${PATH_DESCRIPTION}`,
-              },
+      } : null,
+      
+      this.isToolEnabled('clone') ? {
+        name: 'clone',
+        description: 'Clone a repository',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'URL of the repository to clone',
             },
-            required: ['url'],
-          },
-        },
-        {
-          name: 'status',
-          description: 'Get repository status',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
+            path: {
+              type: 'string',
+              description: `Path to clone into. ${PATH_DESCRIPTION}`,
             },
-            required: [],
           },
+          required: ['url'],
         },
-        {
-          name: 'add',
-          description: 'Stage files',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              files: {
-                type: 'array',
-                items: {
-                  type: 'string',
-                  description: FILE_PATH_DESCRIPTION,
-                },
-                description: 'Files to stage',
-              },
+      } : null,
+      
+      this.isToolEnabled('status') ? {
+        name: 'status',
+        description: 'Get repository status',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
             },
-            required: ['files'],
           },
+          required: [],
         },
-        {
-          name: 'commit',
-          description: 'Create a commit',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              message: {
-                type: 'string',
-                description: 'Commit message',
-              },
+      } : null,
+      
+      this.isToolEnabled('add') ? {
+        name: 'add',
+        description: 'Stage files',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
             },
-            required: ['message'],
-          },
-        },
-        {
-          name: 'push',
-          description: 'Push commits to remote',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
+            files: {
+              type: 'array',
+              items: {
                 type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
+                description: FILE_PATH_DESCRIPTION,
               },
-              remote: {
-                type: 'string',
-                description: 'Remote name',
-                default: 'origin',
-              },
-              branch: {
-                type: 'string',
-                description: 'Branch name',
-              },
-              force: {
-                type: 'boolean',
-                description: 'Force push changes',
-                default: false
-              },
-              noVerify: {
-                type: 'boolean',
-                description: 'Skip pre-push hooks',
-                default: false
-              },
-              tags: {
-                type: 'boolean',
-                description: 'Push all tags',
-                default: false
-              }
+              description: 'Files to stage',
             },
-            required: ['branch'],
           },
+          required: ['files'],
         },
-        {
-          name: 'pull',
-          description: 'Pull changes from remote',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              remote: {
-                type: 'string',
-                description: 'Remote name',
-                default: 'origin',
-              },
-              branch: {
-                type: 'string',
-                description: 'Branch name',
-              },
+      } : null,
+      
+      this.isToolEnabled('commit') ? {
+        name: 'commit',
+        description: 'Commit changes to repository',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}. If not provided, the current working directory will be used.`,
             },
-            required: ['branch'],
-          },
-        },
-        {
-          name: 'branch_list',
-          description: 'List all branches',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
+            message: {
+              type: 'string',
+              description: 'Commit message',
             },
-            required: [],
-          },
-        },
-        {
-          name: 'branch_create',
-          description: 'Create a new branch',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Branch name',
-              },
-              force: {
-                type: 'boolean',
-                description: 'Force create branch even if it exists',
-                default: false
-              },
-              track: {
-                type: 'boolean',
-                description: 'Set up tracking mode',
-                default: true
-              },
-              setUpstream: {
-                type: 'boolean',
-                description: 'Set upstream for push/pull',
-                default: false
-              }
+            templatePath: {
+              type: 'string',
+              description: 'Path to a file containing context/instructions for the model to format the commit message. The file content serves as a prompt rather than a literal template.',
             },
-            required: ['name'],
-          },
-        },
-        {
-          name: 'branch_delete',
-          description: 'Delete a branch',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Branch name',
-              },
+            commit_type: {
+              type: 'string',
+              description: 'Type of commit (e.g., "feat", "fix", "docs", "chore", etc.)',
             },
-            required: ['name'],
-          },
-        },
-        {
-          name: 'checkout',
-          description: 'Switch branches or restore working tree files',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              target: {
-                type: 'string',
-                description: 'Branch name, commit hash, or file path',
-              },
+            all: {
+              type: 'boolean',
+              description: 'Whether to stage all changes before committing',
             },
-            required: ['target'],
           },
+          required: ['message'],
         },
-        {
-          name: 'tag_list',
-          description: 'List tags',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
+      } : null,
+      
+      this.isToolEnabled('push') ? {
+        name: 'push',
+        description: 'Push commits to remote',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
             },
-            required: [],
-          },
-        },
-        {
-          name: 'tag_create',
-          description: 'Create a tag',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Tag name',
-              },
-              message: {
-                type: 'string',
-                description: 'Tag message',
-              },
-              force: {
-                type: 'boolean',
-                description: 'Force create tag even if it exists',
-                default: false
-              },
-              annotated: {
-                type: 'boolean',
-                description: 'Create an annotated tag',
-                default: true
-              },
-              sign: {
-                type: 'boolean',
-                description: 'Create a signed tag',
-                default: false
-              }
+            remote: {
+              type: 'string',
+              description: 'Remote name',
+              default: 'origin',
             },
-            required: ['name'],
-          },
-        },
-        {
-          name: 'tag_delete',
-          description: 'Delete a tag',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Tag name',
-              },
+            branch: {
+              type: 'string',
+              description: 'Branch name',
             },
-            required: ['name'],
-          },
-        },
-        {
-          name: 'remote_list',
-          description: 'List remotes',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
+            force: {
+              type: 'boolean',
+              description: 'Force push changes',
+              default: false
             },
-            required: [],
-          },
-        },
-        {
-          name: 'remote_add',
-          description: 'Add a remote',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Remote name',
-              },
-              url: {
-                type: 'string',
-                description: 'Remote URL',
-              },
+            noVerify: {
+              type: 'boolean',
+              description: 'Skip pre-push hooks',
+              default: false
             },
-            required: ['name', 'url'],
+            tags: {
+              type: 'boolean',
+              description: 'Push all tags',
+              default: false
+            }
           },
+          required: ['branch'],
         },
-        {
-          name: 'remote_remove',
-          description: 'Remove a remote',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              name: {
-                type: 'string',
-                description: 'Remote name',
-              },
+      } : null,
+      
+      this.isToolEnabled('pull') ? {
+        name: 'pull',
+        description: 'Pull changes from remote',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
             },
-            required: ['name'],
-          },
-        },
-        {
-          name: 'stash_list',
-          description: 'List stashes',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
+            remote: {
+              type: 'string',
+              description: 'Remote name',
+              default: 'origin',
             },
-            required: [],
-          },
-        },
-        {
-          name: 'stash_save',
-          description: 'Save changes to stash',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              message: {
-                type: 'string',
-                description: 'Stash message',
-              },
-              includeUntracked: {
-                type: 'boolean',
-                description: 'Include untracked files',
-                default: false
-              },
-              keepIndex: {
-                type: 'boolean',
-                description: 'Keep staged changes',
-                default: false
-              },
-              all: {
-                type: 'boolean',
-                description: 'Include ignored files',
-                default: false
-              }
+            branch: {
+              type: 'string',
+              description: 'Branch name',
             },
-            required: [],
           },
+          required: ['branch'],
         },
-        {
-          name: 'stash_pop',
-          description: 'Apply and remove a stash',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              index: {
-                type: 'number',
-                description: 'Stash index',
-                default: 0,
-              },
+      } : null,
+      
+      this.isToolEnabled('branch_list') ? {
+        name: 'branch_list',
+        description: 'List branches',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
             },
-            required: [],
           },
+          required: [],
         },
-        // New bulk action tool
-        {
-          name: 'bulk_action',
-          description: 'Execute multiple Git operations in sequence. This is the preferred way to execute multiple operations.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: {
-                type: 'string',
-                description: `Path to repository. ${PATH_DESCRIPTION}`,
-              },
-              actions: {
-                type: 'array',
-                description: 'Array of Git operations to execute in sequence',
-                items: {
-                  type: 'object',
-                  oneOf: [
-                    {
-                      type: 'object',
-                      properties: {
-                        type: { const: 'stage' },
-                        files: {
-                          type: 'array',
-                          items: {
-                            type: 'string',
-                            description: FILE_PATH_DESCRIPTION,
-                          },
-                          description: 'Files to stage. If not provided, stages all changes.',
-                        },
-                      },
-                      required: ['type'],
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        type: { const: 'commit' },
-                        message: {
+      } : null,
+      
+      this.isToolEnabled('branch_create') ? {
+        name: 'branch_create',
+        description: 'Create a new branch',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string',
+              description: 'Branch name',
+            },
+            force: {
+              type: 'boolean',
+              description: 'Force create branch even if it exists',
+              default: false
+            },
+            track: {
+              type: 'boolean',
+              description: 'Set up tracking mode',
+              default: true
+            },
+            setUpstream: {
+              type: 'boolean',
+              description: 'Set upstream for push/pull',
+              default: false
+            }
+          },
+          required: ['name'],
+        },
+      } : null,
+      
+      this.isToolEnabled('branch_delete') ? {
+        name: 'branch_delete',
+        description: 'Delete a branch',
+        inputSchema: {
+          type: 'object',
+          properties: { 
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string', 
+              description: 'Branch name',
+            },
+          },
+          required: ['name'],
+        },
+      } : null,
+      
+      this.isToolEnabled('checkout') ? {
+        name: 'checkout',
+        description: 'Switch branches or restore working tree files',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            target: {
+              type: 'string',
+              description: 'Branch name, commit hash, or file path',
+            },
+          },
+          required: ['target'],
+        },
+      } : null,
+      
+      this.isToolEnabled('tag_list') ? {
+        name: 'tag_list',
+        description: 'List tags',
+        inputSchema: {
+          type: 'object',
+          properties: { 
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+          },
+          required: [],
+        },
+      } : null, 
+      
+      this.isToolEnabled('tag_create') ? {
+        name: 'tag_create',
+        description: 'Create a new tag',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string',
+              description: 'Tag name',
+            },
+            message: {
+              type: 'string',
+              description: 'Tag message',
+            },
+            force: {
+              type: 'boolean',
+              description: 'Force create tag even if it exists',
+              default: false
+            },
+            annotated: {
+              type: 'boolean',
+              description: 'Create an annotated tag',
+              default: false
+            },
+            sign: {
+              type: 'boolean',
+              description: 'Create a signed tag',
+              default: false
+            }
+          },
+          required: ['name'],
+        },
+      } : null,
+
+      this.isToolEnabled('tag_delete') ? {
+        name: 'tag_delete',
+        description: 'Delete a tag',
+        inputSchema: {
+          type: 'object',
+          properties: { 
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string', 
+              description: 'Tag name',
+            },
+          },
+          required: ['name'],
+        },
+      } : null,
+      
+        this.isToolEnabled('remote_list') ? {
+        name: 'remote_list',
+        description: 'List remotes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+          },
+          required: [],
+        },
+      } : null,
+      
+      this.isToolEnabled('remote_add') ? {
+        name: 'remote_add',
+        description: 'Add a remote',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string',
+              description: 'Remote name',
+            },
+            url: {
+              type: 'string',
+              description: 'Remote URL',
+            },
+          },
+          required: ['name', 'url'],
+        },
+      } : null,
+      
+      this.isToolEnabled('remote_remove') ? {
+        name: 'remote_remove',
+        description: 'Remove a remote',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            name: {
+              type: 'string',
+              description: 'Remote name',
+            },
+          },
+          required: ['name'],
+        },
+      } : null,
+      
+      this.isToolEnabled('stash_list') ? {
+        name: 'stash_list',
+        description: 'List stashes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+          },
+          required: [],
+        },
+      } : null,
+      
+      this.isToolEnabled('stash_save') ? {
+        name: 'stash_save',
+        description: 'Save changes to stash',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            message: {
+              type: 'string',
+              description: 'Stash message',
+            },
+            includeUntracked: {
+              type: 'boolean',
+              description: 'Include untracked files',
+              default: false
+            },
+            keepIndex: {
+              type: 'boolean',
+              description: 'Keep staged changes',
+              default: false
+            },
+            all: {
+              type: 'boolean',
+              description: 'Include ignored files',
+              default: false
+            }
+          },
+          required: [],
+        },
+      } : null,
+      
+      this.isToolEnabled('stash_pop') ? {
+        name: 'stash_pop',
+        description: 'Apply and remove a stash',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            index: {
+              type: 'number',
+              description: 'Stash index',
+              default: 0,
+            },
+          },
+          required: [],
+        },
+      } : null,
+      
+      this.isToolEnabled('bulk_action') ? {
+        name: 'bulk_action',
+        description: 'Execute multiple git actions sequentially',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            actions: {
+              type: 'array',
+              description: 'List of actions to execute',
+              items: {
+                type: 'object',
+                oneOf: [
+                  {
+                    properties: {
+                      type: { enum: ['stage'] },
+                      files: {
+                        type: 'array',
+                        description: 'Files to stage (default: all files)',
+                        items: { 
                           type: 'string',
-                          description: 'Commit message',
-                        },
-                      },
-                      required: ['type', 'message'],
+                          description: `File path. ${FILE_PATH_DESCRIPTION}`
+                        }
+                      }
                     },
-                    {
-                      type: 'object',
-                      properties: {
-                        type: { const: 'push' },
-                        remote: {
-                          type: 'string',
-                          description: 'Remote name',
-                          default: 'origin',
-                        },
-                        branch: {
-                          type: 'string',
-                          description: 'Branch name',
-                        },
+                    required: ['type']
+                  },
+                  {
+                    properties: {
+                      type: { enum: ['commit'] },
+                      message: {
+                        type: 'string',
+                        description: 'Commit message'
                       },
-                      required: ['type', 'branch'],
+                      templatePath: {
+                        type: 'string',
+                        description: 'Path to a file containing context/instructions for the model to format the commit message'
+                      },
+                      commit_type: {
+                        type: 'string',
+                        description: 'Type of commit (e.g., "feat", "fix", "docs", "chore", etc.)'
+                      },
+                      all: {
+                        type: 'boolean',
+                        description: 'Whether to stage all changes before committing'
+                      }
                     },
-                  ],
-                },
-                minItems: 1,
-              },
-            },
-            required: ['actions'],
+                    required: ['type', 'message']
+                  },
+                  {
+                    properties: {
+                      type: { enum: ['push'] },
+                      remote: {
+                        type: 'string',
+                        description: 'Remote name (default: origin)'
+                      },
+                      branch: {
+                        type: 'string',
+                        description: 'Branch to push'
+                      }
+                    },
+                    required: ['type', 'branch']
+                  }
+                ]
+              }
+            }
           },
+          required: ['actions'],
         },
-      ],
-    }));
+      } : null,
+
+      this.isToolEnabled('create_pull_request') ? {
+        name: 'create_pull_request',
+        description: 'Create a pull request',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: `Path to repository. ${PATH_DESCRIPTION}`,
+            },
+            title: {
+              type: 'string',
+              description: 'Pull request title',
+            },
+            body: {
+              type: 'string',
+              description: 'Pull request description',
+            },
+            templatePath: {
+              type: 'string',
+              description: `Path to PR template file. ${FILE_PATH_DESCRIPTION}`,
+            },
+            baseBranch: {
+              type: 'string',
+              description: 'Base branch for the PR (destination)',
+            },
+            headBranch: {
+              type: 'string',
+              description: 'Head branch for the PR (source)',
+            },
+            draft: {
+              type: 'boolean',
+              description: 'Create as draft PR',
+              default: false
+            }
+          },
+          required: ['title', 'baseBranch', 'headBranch'],
+        },
+      } : null,
+    ];
+    
+    // Register tools with the server, filtering out the nulls (disabled tools)
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const enabledTools = allTools.filter(Boolean) as any[]; // TS filter(Boolean) type guard needs help
+      logger.debug('ToolHandler', 'Registered enabled tools', JSON.stringify(enabledTools.map(t => t.name)));
+      return { tools: enabledTools };
+    });
   }
 
   private setupToolExecutor(): void {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const operation = this.getOperationName(request.params.name);
+      const toolName = request.params.name as GitToolName;
+      
+      // Check if the tool is enabled
+      if (!this.isToolEnabled(toolName)) {
+        throw ErrorHandler.handleValidationError(
+          new Error(`Tool is not enabled: ${toolName}`),
+          { operation: this.getOperationName(toolName) }
+        );
+      }
+      
+      const operation = this.getOperationName(toolName);
       const args = request.params.arguments;
       const context = { operation, path: args?.path as string | undefined };
 
       try {
-        switch (request.params.name) {
+        switch (toolName) {
           case 'init': {
             const validArgs = this.validateArguments(operation, args, isInitOptions);
             return await GitOperations.init(validArgs, context);
@@ -587,7 +753,10 @@ export class ToolHandler {
 
           case 'commit': {
             const validArgs = this.validateArguments(operation, args, isCommitOptions);
-            return await GitOperations.commit(validArgs, context);
+            return await GitOperations.commit(
+              validArgs, 
+              context
+            );
           }
 
           case 'push': {
@@ -670,9 +839,10 @@ export class ToolHandler {
             return await GitOperations.executeBulkActions(validArgs, context);
           }
 
+
           default:
             throw ErrorHandler.handleValidationError(
-              new Error(`Unknown tool: ${request.params.name}`),
+              new Error(`Unknown tool: ${toolName}`),
               { operation }
             );
         }
