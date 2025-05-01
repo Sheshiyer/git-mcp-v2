@@ -246,8 +246,7 @@ export type GitToolName =
   | 'stash_list'
   | 'stash_save'
   | 'stash_pop'
-  | 'bulk_action'
-  | 'create_pull_request';
+  | 'bulk_action';
 
 // Configuration for the Git MCP server
 export interface GitServerConfig {

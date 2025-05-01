@@ -663,46 +663,6 @@ export class ToolHandler {
           required: ['actions'],
         },
       } : null,
-
-      this.isToolEnabled('create_pull_request') ? {
-        name: 'create_pull_request',
-        description: 'Create a pull request',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: `Path to repository. ${PATH_DESCRIPTION}`,
-            },
-            title: {
-              type: 'string',
-              description: 'Pull request title',
-            },
-            body: {
-              type: 'string',
-              description: 'Pull request description',
-            },
-            templatePath: {
-              type: 'string',
-              description: `Path to PR template file. ${FILE_PATH_DESCRIPTION}`,
-            },
-            baseBranch: {
-              type: 'string',
-              description: 'Base branch for the PR (destination)',
-            },
-            headBranch: {
-              type: 'string',
-              description: 'Head branch for the PR (source)',
-            },
-            draft: {
-              type: 'boolean',
-              description: 'Create as draft PR',
-              default: false
-            }
-          },
-          required: ['title', 'baseBranch', 'headBranch'],
-        },
-      } : null,
     ];
     
     // Register tools with the server, filtering out the nulls (disabled tools)
